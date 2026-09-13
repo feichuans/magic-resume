@@ -3,9 +3,15 @@
   "version": "2.0.9",
   "private": true,
   "type": "module",
+  "bin": {
+    "magic-resume": "bin/magic-resume.mjs"
+  },
   "packageManager": "pnpm@10.3.0",
   "scripts": {
     "dev": "vite dev",
+    "cli": "node bin/magic-resume.mjs",
+    "test": "tsx --test tests/*.test.ts",
+    "test:cli": "tsx --test tests/cli.test.ts",
     "test:ai": "tsx --test tests/*.test.ts",
     "test:resume-import": "tsx --test tests/resume-import.test.ts",
     "test:preview": "node --test tests/preview.browser.mjs",
