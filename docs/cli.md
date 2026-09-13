@@ -36,7 +36,6 @@ magic-resume add resume.json experience --company "字节跳动" --position "前
   --date "2021.07 - 2024.12" --details @details.md
 magic-resume remove resume.json experience 0
 magic-resume move resume.json experience 0 1
-
 # 模板与模块
 magic-resume template resume.json swiss
 magic-resume section resume.json certificates --enable --order 5   # 标准模块不在空白简历里，第一次用会自动注册
@@ -76,6 +75,8 @@ settings.lineHeight          # globalSettings 的简写
 | `@file.md` | 读文件（`.md` 按 Markdown 转换） |
 
 `--format text|markdown|html|json` 可以强制指定，`json` 用于写入非字符串值。
+
+`set` 的第三个参数和 `add` 的所有字段都支持 `@file`（除 `url` / `photo` 这类本身就是路径的字段）。
 
 ## 渲染
 

@@ -15,6 +15,7 @@ import {
   moveItem,
   normalizeSectionName,
   removeItem,
+  resolveValue,
 } from "./resume-edit";
 import {
   detectLocale,
@@ -312,6 +313,14 @@ defineCommand("add", "Append an item to a section", async (args) => {
   for (const [key, value] of Object.entries(args.flags)) {
     if (typeof value !== "string") continue;
     fields[key] = value;
+  }
+
+  // `@file` works for item fields too, not just for `set`. Only the path-like
+  // fields (url/photo) keep their literal value.
+  const literalFields = new Set(["url", "photo"]);
+  for (const [key, value] of Object.entries(fields)) {
+    if (literalFields.has(key)) continue;
+    fields[key] = await resolveValue(value, { baseDir: dirname(file) });
   }
 
   const item = addItem(resume, section, fields, {
