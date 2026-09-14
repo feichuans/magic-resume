@@ -127,7 +127,10 @@ echo '{"ops":[{"op":"set","path":"basic.title","value":"X"}]}' | magic-resume op
 magic-resume validate tailored.json      # 空模块、缺姓名等提示
 magic-resume diff resume.json tailored.json   # 逐字段对比改了什么
 magic-resume read tailored.json | head -20    # 复核内容
+magic-resume ats tailored.json --json    # 模拟 ATS 卡片：项目是否被合并、职位是否粘上邮箱
 ```
+
+`ats` 不是北森/飞书/Moka 本体，是同形态的字段切段：按标准标题分板块，按「名称 + 日期」切条目。看 `parsed.projects[].name` 的条数；`glued-contact` / `project-merged` / `project-url-as-name` 为 error。
 
 `render --json` 的 `pageCount` 和 `onePage.cannotFit` 让 Agent 能自动判断是否需要精简内容或调整 `min-scale`：
 

@@ -892,6 +892,10 @@ defineCommand("ats", "Parse a rendered PDF the way an ATS would and report text-
   emit(flagBool(args, "json"), { pdf: pdfPath, ...report, text: flagBool(args, "dump") ? report.text : undefined }, () => {
     const mark = report.score >= 80 ? c.green : report.score >= 50 ? c.yellow : c.red;
     log(`${mark(`ATS ${report.score}/100`)}  ${basename(pdfPath)}  ${report.pages} page${report.pages === 1 ? "" : "s"}  ${report.chars} chars`);
+    const card = report.parsed;
+    log(`${c.dim("card")}  ${card.name}  ${card.title}  ${card.email}  ${card.phone}`);
+    log(`${c.dim("exp ")}  ${card.experience.length}  ${card.experience.map((item) => item.name).join(" | ") || "—"}`);
+    log(`${c.dim("proj")}  ${card.projects.length}  ${card.projects.map((item) => item.name).join(" | ") || "—"}`);
     for (const finding of report.findings) {
       const tag = finding.severity === "error" ? c.red("error") : finding.severity === "warn" ? c.yellow("warn ") : c.dim("info ");
       log(`  ${tag}  ${finding.message}`);

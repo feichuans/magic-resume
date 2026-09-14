@@ -467,3 +467,57 @@ Github: https://github.com/feichuans
   assert.equal(scoreAtsFindings(findings), 100);
   assert.equal(findings[0].id, "ok");
 });
+
+test("parseAtsCard splits projects on date lines and flags a glued title+email row", async () => {
+  const { parseAtsCard, evaluateAtsText } = await import("../src/cli/ats");
+  const glued = `方统义
+Agent 前端开发邮箱:feichuan05@gmail.com 电话:17720291948
+教育经历
+湖北商贸学院 本科 2023/09 - 2027/06
+专业技能
+TypeScript
+实习经历
+北京智精灵科技有限公司 Agent前端开发 2026/03 - 2026/08
+项目背景：Aurora
+上海德亿门生科技教育有限公司 前端开发 2025/06 - 2025/12
+项目经历
+Buffin｜AI 编码软件交付中枢 2026/06 - 2026/09
+前端核心贡献者
+项目地址：https://github.com/buffin-ai/buffin
+会话实时流
+Openviking 2026/02 - 2026/06
+前端贡献者
+项目地址：https://github.com/volcengine/OpenViking/pull/2128
+控制台`;
+  const card = parseAtsCard(glued);
+  assert.equal(card.name, "方统义");
+  assert.equal(card.title, "Agent 前端开发");
+  assert.equal(card.email, "feichuan05@gmail.com");
+  assert.equal(card.experience.length, 2);
+  assert.equal(card.projects.length, 2);
+  assert.equal(card.projects[0].name, "Buffin｜AI 编码软件交付中枢");
+  assert.equal(card.projects[1].name, "Openviking");
+  const gluedFindings = evaluateAtsText(glued, 2, card).map((item) => item.id);
+  assert.ok(gluedFindings.includes("glued-contact"));
+
+  const merged = `方统义
+邮箱: a@b.com
+电话: 17720291948
+个人网站: https://feichuans.com
+教育经历
+学校
+专业技能
+TS
+实习经历
+公司 2026/03 - 2026/08
+项目经历
+Buffin｜AI 编码软件交付中枢 前端核心贡献者 2026/06 - 2026/09
+https://github.com/buffin-ai/buffin
+描述
+Openviking 前端贡献者 2026/02 - 2026/06
+https://github.com/volcengine/OpenViking/pull/2128`;
+  const mergedCard = parseAtsCard(merged);
+  assert.equal(mergedCard.projects.length, 2);
+  const mergedIds = evaluateAtsText(merged, 2, mergedCard).map((item) => item.id);
+  assert.ok(mergedIds.includes("project-unlabeled-url"));
+});

@@ -58,9 +58,12 @@ const BaseInfo = ({ basic = {} as BasicInfo, globalSettings, template }: BaseInf
         </motion.div>
     );
 
+    // Stack name/title above contacts. A side-by-side header puts the title
+    // and "邮箱:" on the same visual row; ATS text extract then reads
+    // "Agent 前端开发邮箱:…" as one token.
     const layoutStyles = {
-        left: { container: "flex items-center justify-between gap-6", leftContent: "flex items-center gap-6 shrink-0 min-w-0 max-w-[42%]", fields: "grid flex-1 min-w-0 grid-cols-2 gap-x-6 gap-y-2 justify-start", nameTitle: "text-left min-w-0 max-w-[16rem] flex-1" },
-        right: { container: "flex items-center justify-between gap-6 flex-row-reverse", leftContent: "flex flex-row-reverse justify-start items-center gap-6 shrink-0 min-w-0 max-w-[42%]", fields: "grid flex-1 min-w-0 grid-cols-2 gap-x-6 gap-y-2 justify-start", nameTitle: "text-right min-w-0 max-w-[16rem] flex-1" },
+        left: { container: "flex flex-col gap-2", leftContent: "flex items-center gap-6", fields: "grid w-full grid-cols-2 gap-x-6 gap-y-1", nameTitle: "text-left min-w-0 flex-1" },
+        right: { container: "flex flex-col gap-2", leftContent: "flex flex-row-reverse items-center gap-6", fields: "grid w-full grid-cols-2 gap-x-6 gap-y-1", nameTitle: "text-right min-w-0 flex-1" },
         center: { container: "flex flex-col items-center gap-3", leftContent: "flex flex-col items-center gap-4", fields: "w-full flex justify-center items-center flex-wrap gap-3", nameTitle: "text-center min-w-0 max-w-full" },
     };
 

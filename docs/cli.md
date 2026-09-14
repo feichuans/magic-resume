@@ -153,7 +153,9 @@ pnpm test:ai         # 原有测试
 
 | 分组 | 命令 |
 | --- | --- |
-| 读取 | `read` `schema` `ls` `show` `validate` `diff` `templates` `fonts` |
+| 读取 | `read` `schema` `ls` `show` `validate` `ats` `diff` `templates` `fonts` |
 | 编辑 | `init` `set` `add` `remove` `move` `clear` `template` `section` |
 | 生成 | `ops` `variant` |
 | 渲染 | `render` `preview` `export-md` |
+
+`ats` 从 PDF 文本层抽出姓名/联系方式/教育/实习/项目卡片，并报告粘行、项目合并、图标链接等解析陷阱。`--json` 带 `parsed`；`--dump` 附带原文。
