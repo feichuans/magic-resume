@@ -160,6 +160,8 @@ export interface RenderResult {
   contentHeightPx: number;
   pageCount: number;
   onePage: OnePageResult;
+  /** True when the produced PDF really has a single page. */
+  fitsOnePage: boolean;
   warnings: string[];
 }
 
@@ -283,13 +285,7 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
 
     const usableHeight = A4_HEIGHT_PX - 2 * request.pagePadding;
     const actualContentHeight = contentHeightPx - 2 * request.pagePadding;
-
-    if (onePage.cannotFit) {
-      const idealScale = usableHeight / actualContentHeight;
-      warnings.push(
-        `content needs a ${(idealScale * 100).toFixed(1)}% scale to fit one page, but ${(onePage.scale * 100).toFixed(0)}% is the minimum; output keeps the ${(onePage.scale * 100).toFixed(0)}% scale and may spill onto a second page`
-      );
-    }
+    const idealScale = usableHeight / actualContentHeight;
 
     const estimatedPages =
       actualContentHeight <= usableHeight
@@ -332,7 +328,15 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
       });
 
       pageCount = countPdfPages(pdf);
-      if (!onePage.isScaled && pageCount > 1) {
+
+      // Chrome's zoom shrink does not paginate the way the height arithmetic
+      // predicts, so the outcome is judged against the produced file rather
+      // than against `onePage.cannotFit`.
+      if (pageCount > 1 && onePage.isScaled) {
+        warnings.push(
+          `still ${pageCount} A4 pages at ${(onePage.scale * 100).toFixed(0)}% scale (the raw ratio suggested ${(idealScale * 100).toFixed(1)}%): trim content or lower --min-scale`
+        );
+      } else if (pageCount > 1) {
         warnings.push(`content spans ${pageCount} A4 pages`);
       }
     }
@@ -359,7 +363,7 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
       warnings.push(`asset failed to load: ${url.replace(server.origin, "")}`);
     }
 
-    return { pdf, png, contentHeightPx, pageCount, onePage, warnings };
+    return { pdf, png, contentHeightPx, pageCount, onePage, fitsOnePage: pageCount === 1, warnings };
   } finally {
     await browser?.close();
     await server.close();

@@ -43,6 +43,8 @@ export interface RenderOutput {
   contentHeightPx: number;
   pageCount: number;
   onePage: OnePageResult;
+  /** True when the produced PDF really has a single page. */
+  fitsOnePage: boolean;
   warnings: string[];
   durationMs: number;
 }
@@ -211,6 +213,7 @@ export class ResumeRenderer {
       contentHeightPx: result.contentHeightPx,
       pageCount: result.pageCount,
       onePage: result.onePage,
+      fitsOnePage: result.fitsOnePage,
       warnings: result.warnings,
       durationMs: Date.now() - started,
     };

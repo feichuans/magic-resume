@@ -409,3 +409,18 @@ test("countPdfPages reads the real page count from the PDF bytes", async () => {
   const onePage = await readFile("tests/fixtures/one-page.pdf");
   assert.equal(countPdfPages(onePage), 1);
 });
+
+test("computeOnePageScale cannotFit only reflects the raw height ratio", () => {
+  const pagePadding = 32;
+  const usable = A4_HEIGHT_PX - 2 * pagePadding;
+
+  // 72% would be needed, so at the 0.9 floor the flag is set — but the real PDF
+  // may still fit one page, which is why renderResume reports `fitsOnePage`.
+  const result = computeOnePageScale(usable / 0.72 + 2 * pagePadding, pagePadding, 0.9);
+  assert.equal(result.scale, 0.9);
+  assert.equal(result.cannotFit, true);
+
+  const fits = computeOnePageScale(usable / 0.72 + 2 * pagePadding, pagePadding, 0.7);
+  assert.equal(fits.scale, 0.72);
+  assert.equal(fits.cannotFit, false);
+});

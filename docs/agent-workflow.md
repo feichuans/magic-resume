@@ -107,8 +107,9 @@ magic-resume variant base.json v.json --ops - --json
 ```
 
 ```json
-{"output":"/abs/v.pdf","format":"pdf","bytes":1186827,"pageCount":2,
- "onePage":{"scale":1,"isScaled":false,"cannotFit":false},"warnings":[]}
+{"output":"/abs/v.pdf","format":"pdf","bytes":1186827,"pageCount":1,
+ "fitsOnePage":true,"onePage":{"scale":0.75,"isScaled":true,"cannotFit":true},
+ "warnings":[]}
 ```
 
 `ops` 和 `variant` 的 `--ops` 支持 `-` 从 stdin 读取，Agent 不需要写临时文件：
@@ -131,8 +132,10 @@ magic-resume read tailored.json | head -20    # 复核内容
 | --- | --- |
 | `pageCount > 1` 且不想缩 | 用 `clear` / `remove` 删减条目 |
 | 想强行压成一页 | `--one-page --min-scale 0.75` |
-| `onePage.cannotFit: true` | 内容过多，缩小也压不下，必须删减 |
+| `fitsOnePage: false` | 产物确实多于一页，必须删减内容 |
 | 想让某份简历默认一页 | `{ "op": "set", "path": "globalSettings.autoOnePage", "value": true }` |
+
+`pageCount` 从生成的 PDF 里读出来，不是按高度估算的：Chrome 的 `zoom` 缩放分页行为与高度除法不一致（实测按高度算要 2 页的简历，`--min-scale 0.75` 实际输出 1 页）。判断是否成功压成一页请用 **`fitsOnePage`**。
 
 ## 典型场景
 
