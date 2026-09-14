@@ -399,3 +399,13 @@ test("clearSection empties one section and keeps the rest", () => {
   assert.ok(resume.experience.length > 0);
   assert.ok(resume.menuSections.some((section) => section.id === "projects"));
 });
+
+test("countPdfPages reads the real page count from the PDF bytes", async () => {
+  const { countPdfPages } = await import("../src/cli/browser-render");
+  const { readFile } = await import("node:fs/promises");
+  const pdf = await readFile("tests/fixtures/two-pages.pdf");
+  assert.equal(countPdfPages(pdf), 2);
+
+  const onePage = await readFile("tests/fixtures/one-page.pdf");
+  assert.equal(countPdfPages(onePage), 1);
+});

@@ -93,6 +93,20 @@ const startRenderServer = async (options: RenderServerOptions): Promise<RenderSe
   };
 };
 
+/**
+ * Real page count of a rendered PDF. Chrome's `zoom`-based shrink does not
+ * paginate the way a plain height/usable-height division predicts, so the count
+ * is read back from the file instead of estimated.
+ */
+export const countPdfPages = (pdf: Buffer): number => {
+  const text = pdf.toString("latin1");
+  const pageObjects = text.match(/\/Type\s*\/Page(?![s])/g)?.length ?? 0;
+  if (pageObjects > 0) return pageObjects;
+
+  const countHint = text.match(/\/Count\s+(\d+)/);
+  return countHint ? Number(countHint[1]) : 1;
+};
+
 export interface OnePageResult {
   scale: number;
   isScaled: boolean;
@@ -277,12 +291,13 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
       );
     }
 
-    const pageCount =
+    const estimatedPages =
       actualContentHeight <= usableHeight
         ? 1
         : Math.ceil(actualContentHeight / usableHeight);
 
     let pdf: Buffer | undefined;
+    let pageCount = estimatedPages;
     if (request.pdf) {
       // Padding moves into the @page margin so every page keeps the same gutter.
       await page.evaluate(
@@ -316,6 +331,7 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
         },
       });
 
+      pageCount = countPdfPages(pdf);
       if (!onePage.isScaled && pageCount > 1) {
         warnings.push(`content spans ${pageCount} A4 pages`);
       }
