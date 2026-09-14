@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_TEMPLATES } from "@/components/templates/registry";
 import { normalizeFontFamily } from "@/utils/fonts";
@@ -24,11 +24,42 @@ import {
   normalizeResume,
   type Locale,
 } from "./resume-data";
+import {
+  OpsError,
+  applyOps,
+  clearSection,
+  type OpsDocument,
+  type ResumeOp,
+} from "./resume-ops";
+import {
+  buildSchema,
+  countItems,
+  diffResumes,
+  formatDiffValue,
+  renderResumeText,
+} from "./resume-read";
 import { ResumeRenderer, readResumeFile } from "./renderer";
 
 const VERSION = "0.1.0";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
+/**
+ * Vite and PostCSS resolve plugins relative to `process.cwd()`, so rendering a
+ * resume from another directory would miss Tailwind. The CLI works from the
+ * package root while user paths keep resolving against the invoking directory.
+ */
+const INVOKE_DIR = process.cwd();
+
+const pinWorkingDirectory = () => {
+  if (process.cwd() !== PACKAGE_ROOT) {
+    process.chdir(PACKAGE_ROOT);
+  }
+};
+
+/** Resolves a user-supplied path against the directory the CLI was invoked from. */
+const userPath = (filePath: string): string =>
+  isAbsolute(filePath) ? filePath : resolve(INVOKE_DIR, filePath);
 
 const SHORT_FLAGS: Record<string, string> = {
   o: "output",
@@ -137,12 +168,25 @@ const c = {
 
 const log = (message = "") => process.stdout.write(`${message}\n`);
 const warn = (message: string) => process.stderr.write(`${c.yellow("warning")} ${message}\n`);
+const readFileText = (filePath: string) => readFile(filePath, "utf8");
+
+/**
+ * `--json` switches a command's output to a single machine-readable object, so
+ * an agent never has to parse coloured tables.
+ */
+const emit = (json: boolean, payload: unknown, human: () => void) => {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    return;
+  }
+  human();
+};
 
 class CliError extends Error {}
 
 const requireFile = (filePath: string | undefined, hint: string): string => {
   if (!filePath) throw new CliError(hint);
-  const absolute = resolve(filePath);
+  const absolute = userPath(filePath);
   if (!existsSync(absolute)) throw new CliError(`file not found: ${absolute}`);
   return absolute;
 };
@@ -200,7 +244,7 @@ const defineCommand = (
 };
 
 defineCommand("init", "Create a resume JSON file (sample content or empty)", async (args) => {
-  const output = resolve(args.positionals[0] ?? "resume.json");
+  const output = userPath(args.positionals[0] ?? "resume.json");
   if (existsSync(output) && !flagBool(args, "force")) {
     throw new CliError(`${output} already exists (use --force to overwrite)`);
   }
@@ -249,14 +293,221 @@ defineCommand("show", "Print a resume field, or the whole resume as JSON", async
   const path = args.positionals[1];
 
   if (!path) {
-    log(JSON.stringify(resume, null, 2));
+    emit(flagBool(args, "json"), resume, () => log(JSON.stringify(resume, null, 2)));
     return 0;
   }
 
   const value = getByPath(resume, path);
   if (value === undefined) throw new CliError(`no value at "${path}"`);
-  log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+  emit(flagBool(args, "json"), { path, value }, () =>
+    log(typeof value === "string" ? value : JSON.stringify(value, null, 2))
+  );
   return 0;
+});
+
+/**
+ * `read` is the agent's entry point: a compact text view with list indices,
+ * rich text flattened to Markdown, and none of the JSON bookkeeping noise.
+ */
+defineCommand("read", "Print a compact, index-bearing view of a resume (for agents)", async (args) => {
+  const file = requireFile(args.positionals[0], "usage: magic-resume read <resume.json>");
+  const resume = await loadResume(file);
+  emit(flagBool(args, "json"), resume, () => log(renderResumeText(resume, { file })));
+  return 0;
+});
+
+defineCommand("schema", "Print the editable surface: paths, item fields, enums", async (args) => {
+  const schema = buildSchema();
+  emit(flagBool(args, "json"), schema, () => log(JSON.stringify(schema, null, 2)));
+  return 0;
+});
+
+defineCommand("diff", "Compare two resume files field by field", async (args) => {
+  const leftFile = requireFile(args.positionals[0], "usage: magic-resume diff <a.json> <b.json>");
+  const rightFile = requireFile(args.positionals[1], "usage: magic-resume diff <a.json> <b.json>");
+  const left = await loadResume(leftFile);
+  const right = await loadResume(rightFile);
+  const entries = diffResumes(left, right);
+
+  emit(flagBool(args, "json"), { changed: entries.length, entries }, () => {
+    if (entries.length === 0) {
+      log("no differences");
+      return;
+    }
+    for (const entry of entries) {
+      log(c.yellow(entry.path));
+      log(`  - ${formatDiffValue(entry.from)}`);
+      log(`  + ${formatDiffValue(entry.to)}`);
+    }
+    log(`${entries.length} field${entries.length === 1 ? "" : "s"} changed`);
+  });
+  return 0;
+});
+
+/**
+ * `ops` applies a whole batch of edits in one process start, atomically: the
+ * agent writes one JSON file describing the new resume instead of running a
+ * dozen `set` commands.
+ */
+/**
+ * Reads an ops document from a file, or from stdin when the argument is `-`,
+ * which is how a calling agent usually pipes a generated batch.
+ */
+const readOpsDocument = async (source: string): Promise<ResumeOp[]> => {
+  const raw =
+    source === "-"
+      ? await new Promise<string>((done, fail) => {
+          let buffer = "";
+          process.stdin.setEncoding("utf8");
+          process.stdin.on("data", (chunk) => (buffer += chunk));
+          process.stdin.on("end", () => done(buffer));
+          process.stdin.on("error", fail);
+        })
+      : await readFileText(requireFile(source, "missing --ops <ops.json>"));
+
+  let document: OpsDocument | ResumeOp[];
+  try {
+    document = JSON.parse(raw) as OpsDocument | ResumeOp[];
+  } catch (error) {
+    throw new CliError(`--ops is not valid JSON: ${(error as Error).message}`);
+  }
+
+  const ops = Array.isArray(document) ? document : document.ops;
+  if (!Array.isArray(ops) || ops.length === 0) {
+    throw new CliError(`--ops contains no ops (expected {"ops": [...]} or a bare array)`);
+  }
+
+  return ops;
+};
+
+defineCommand("ops", "Apply a batch of edits from a JSON file, atomically", async (args) => {
+  const file = requireFile(args.positionals[0], "usage: magic-resume ops <resume.json> --ops <ops.json|->");
+  const opsSource = flagString(args, "ops");
+  if (!opsSource) throw new CliError("missing --ops <ops.json|-> (use - to read stdin)");
+  const ops = await readOpsDocument(opsSource);
+
+  const resume = await loadResume(file);
+  const locale = resolveLocale(args, resume);
+  const { resume: next, applied } = await applyOps(resume, ops, {
+    baseDir: dirname(file),
+    locale,
+  });
+
+  const dryRun = flagBool(args, "dryRun");
+  for (const entry of applied) log(`${dryRun ? c.dim("would ") : c.green("applied ")}${entry}`);
+
+  if (dryRun) {
+    log(c.dim("(dry run — nothing written)"));
+    return 0;
+  }
+
+  await saveResume(file, next);
+  log(`${c.green("wrote")} ${file}`);
+  return 0;
+});
+
+/**
+ * `variant` is the variant-generation workhorse: read a source resume, apply a
+ * batch of ops, write the result to a new file, and optionally render it.
+ */
+defineCommand("variant", "Generate a tailored copy of a resume from a batch of ops", async (args) => {
+  const source = requireFile(args.positionals[0], "usage: magic-resume variant <base.json> <out.json> --ops <ops.json|->");
+  const target = args.positionals[1];
+  if (!target) throw new CliError("missing <out.json>");
+  const targetPath = userPath(target);
+
+  if (existsSync(targetPath) && !flagBool(args, "force")) {
+    throw new CliError(`${targetPath} already exists (use --force to overwrite)`);
+  }
+
+  const opsFile = flagString(args, "ops");
+  const resume = await loadResume(source);
+  const locale = resolveLocale(args, resume);
+
+  const ops: ResumeOp[] = opsFile ? await readOpsDocument(opsFile) : [];
+
+  const templateId = flagString(args, "template");
+  const { resume: next, applied } = await applyOps(resume, ops, {
+    baseDir: dirname(source),
+    locale,
+    defaults: { templateId },
+  });
+
+  next.id = (await import("@/utils/uuid")).generateUUID();
+  next.createdAt = new Date().toISOString();
+  const title = flagString(args, "title");
+  if (title) next.title = title;
+
+  await saveResume(targetPath, next);
+
+  const renderFormat = flagString(args, "format");
+  const json = flagBool(args, "json");
+
+  // Without --format there is nothing to render, so the JSON report can be
+  // emitted right away.
+  if (!renderFormat) {
+    emit(json, { source, output: targetPath, title: next.title, templateId: next.templateId, applied }, () => {
+      log(`${c.green("created")} ${targetPath} from ${basename(source)}`);
+      for (const entry of applied) log(`  ${entry}`);
+      log(`  template ${next.templateId}, title ${next.title}`);
+    });
+    return 0;
+  }
+
+  if (renderFormat !== "pdf" && renderFormat !== "png") {
+    throw new CliError(`unsupported --format "${renderFormat}" (use pdf or png)`);
+  }
+
+  const output = userPath(
+    flagString(args, "output") ?? targetPath.replace(/\.json$/i, `.${renderFormat}`)
+  );
+
+  return withRenderer(async (renderer) => {
+    const result = await renderer.render(next, {
+      format: renderFormat,
+      locale,
+      onePage: flagBool(args, "noOnePage")
+        ? false
+        : flagBool(args, "onePage") || Boolean(next.globalSettings.autoOnePage),
+      minOnePageScale: flagNumber(args, "minScale"),
+      imageScale: flagNumber(args, "imageScale"),
+      browserChannel: flagString(args, "browserChannel"),
+      saveHtml: flagBool(args, "html"),
+      outputPath: output,
+      onProgress: (message) => process.stderr.write(`${c.dim(message)}\n`),
+    });
+
+    emit(
+      json,
+      {
+        source,
+        output: targetPath,
+        title: next.title,
+        templateId: next.templateId,
+        applied,
+        render: {
+          output: result.outputPath,
+          format: renderFormat,
+          bytes: result.bytes,
+          contentHeightPx: result.contentHeightPx,
+          pageCount: result.pageCount,
+          onePage: result.onePage,
+          warnings: result.warnings,
+        },
+      },
+      () => {
+        log(`${c.green("created")} ${targetPath} from ${basename(source)}`);
+        for (const entry of applied) log(`  ${entry}`);
+        log(`  template ${next.templateId}, title ${next.title}`);
+        log(
+          `${c.green("rendered")} ${result.outputPath} (${formatBytes(result.bytes)}, ${result.pageCount} page${result.pageCount > 1 ? "s" : ""})`
+        );
+      }
+    );
+
+    for (const message of result.warnings) warn(message);
+    return 0;
+  });
 });
 
 defineCommand("set", "Set a field (dot/bracket paths, markdown or plain text for rich text)", async (args) => {
@@ -383,6 +634,19 @@ defineCommand("template", "Switch template (also updates theme colour and spacin
   return 0;
 });
 
+defineCommand("clear", "Empty a section (keep the section, drop its items)", async (args) => {
+  const file = requireFile(args.positionals[0], "usage: magic-resume clear <resume.json> <section>");
+  const sectionId = args.positionals[1];
+  if (!sectionId) throw new CliError("missing <section>");
+
+  const resume = await loadResume(file);
+  const before = countItems(resume, sectionId);
+  clearSection(resume, sectionId, args.positionals[2]);
+  await saveResume(file, resume);
+  log(`${c.green("cleared")} ${sectionId} (${before} items removed)`);
+  return 0;
+});
+
 defineCommand("section", "Enable, disable, rename or reorder a section", async (args) => {
   const file = requireFile(args.positionals[0], "usage: magic-resume section <resume.json> <sectionId> [--enable|--disable]");
   const sectionId = args.positionals[1];
@@ -414,54 +678,52 @@ defineCommand("ls", "Summarise the resume: sections, items and settings", async 
   const file = requireFile(args.positionals[0], "usage: magic-resume ls <resume.json>");
   const resume = await loadResume(file);
   const template = DEFAULT_TEMPLATES.find((item) => item.id === resume.templateId);
-
-  log(`${c.bold(resume.title)} ${c.dim(`(${basename(file)})`)}`);
-  log(`  template  ${resume.templateId} — ${template?.name ?? "unknown"}`);
-  log(`  font      ${normalizeFontFamily(resume.globalSettings.fontFamily)}`);
-  log(`  settings  pagePadding=${resume.globalSettings.pagePadding} fontSize=${resume.globalSettings.baseFontSize} lineHeight=${resume.globalSettings.lineHeight} autoOnePage=${resume.globalSettings.autoOnePage ?? false}`);
-  log(`  basics    ${resume.basic.name || "(empty)"} / ${resume.basic.title || "(empty)"}`);
-  log("  sections");
-
   const ordered = [...resume.menuSections].sort((a, b) => a.order - b.order);
-  for (const section of ordered) {
-    const count = countSectionItems(resume, section.id);
-    const state = section.enabled ? c.green("on ") : c.dim("off");
-    log(`    ${state} ${section.id.padEnd(16)} ${String(count).padStart(2)} items  ${c.dim(section.title)}`);
-  }
 
-  const orphans = Object.keys(resume.customData).filter(
-    (id) => !resume.menuSections.some((section) => section.id === id)
+  emit(
+    flagBool(args, "json"),
+    {
+      file,
+      title: resume.title,
+      templateId: resume.templateId,
+      templateName: template?.name ?? null,
+      font: normalizeFontFamily(resume.globalSettings.fontFamily),
+      settings: resume.globalSettings,
+      basic: { name: resume.basic.name, title: resume.basic.title },
+      sections: ordered.map((section, index) => ({
+        index,
+        id: section.id,
+        title: section.title,
+        enabled: section.enabled,
+        order: section.order,
+        items: countItems(resume, section.id),
+      })),
+    },
+    () => {
+      log(`${c.bold(resume.title)} ${c.dim(`(${basename(file)})`)}`);
+      log(`  template  ${resume.templateId} — ${template?.name ?? "unknown"}`);
+      log(`  font      ${normalizeFontFamily(resume.globalSettings.fontFamily)}`);
+      log(`  settings  pagePadding=${resume.globalSettings.pagePadding} fontSize=${resume.globalSettings.baseFontSize} lineHeight=${resume.globalSettings.lineHeight} autoOnePage=${resume.globalSettings.autoOnePage ?? false}`);
+      log(`  basics    ${resume.basic.name || "(empty)"} / ${resume.basic.title || "(empty)"}`);
+      log("  sections");
+
+      for (const section of ordered) {
+        const count = countItems(resume, section.id);
+        const state = section.enabled ? c.green("on ") : c.dim("off");
+        log(`    ${state} ${section.id.padEnd(16)} ${String(count).padStart(2)} items  ${c.dim(section.title)}`);
+      }
+
+      const orphans = Object.keys(resume.customData).filter(
+        (id) => !resume.menuSections.some((section) => section.id === id)
+      );
+      for (const id of orphans) {
+        log(`    ${c.dim("off")} ${id.padEnd(16)} ${String(resume.customData[id].length).padStart(2)} items  ${c.dim("(not in menu)")}`);
+      }
+    }
   );
-  for (const id of orphans) {
-    log(`    ${c.dim("off")} ${id.padEnd(16)} ${String(resume.customData[id].length).padStart(2)} items  ${c.dim("(not in menu)")}`);
-  }
 
   return 0;
 });
-
-const countSectionItems = (
-  resume: Awaited<ReturnType<typeof loadResume>>,
-  sectionId: string
-): number => {
-  switch (sectionId) {
-    case "basic":
-      return 1;
-    case "skills":
-      return resume.skillContent ? 1 : 0;
-    case "experience":
-      return resume.experience.length;
-    case "education":
-      return resume.education.length;
-    case "projects":
-      return resume.projects.length;
-    case "certificates":
-      return resume.certificates.length;
-    case "selfEvaluation":
-      return resume.selfEvaluationContent ? 1 : 0;
-    default:
-      return resume.customData[sectionId]?.length ?? 0;
-  }
-};
 
 defineCommand("render", "Render a resume to PDF or PNG in a headless browser", async (args) => {
   const file = requireFile(args.positionals[0], "usage: magic-resume render <resume.json> [-o out.pdf]");
@@ -479,7 +741,7 @@ defineCommand("render", "Render a resume to PDF or PNG in a headless browser", a
   const resume = await loadResume(file);
   const locale = resolveLocale(args, resume);
   // An explicit -o is used verbatim; only the default derives from --format.
-  const output = resolve(explicitOutput ?? defaultOutputName(file, format));
+  const output = userPath(explicitOutput ?? defaultOutputName(file, format));
 
   return withRenderer(async (renderer) => {
     const started = Date.now();
@@ -501,16 +763,33 @@ defineCommand("render", "Render a resume to PDF or PNG in a headless browser", a
       onProgress: (message) => process.stderr.write(`${c.dim(message)}\n`),
     });
 
-    log(`${c.green("rendered")} ${result.outputPath}`);
-    log(`  size          ${formatBytes(result.bytes)}`);
-    log(`  content       ${result.contentHeightPx}px (~${result.pageCount} A4 page${result.pageCount > 1 ? "s" : ""})`);
-    log(`  one page      ${
-        result.onePage.isScaled
-          ? `${(result.onePage.scale * 100).toFixed(1)}% scale${result.onePage.cannotFit ? " (cannot fit)" : ""}`
-          : "not needed"
-      }`);
-    log(`  duration      ${Date.now() - started}ms`);
-    if (result.htmlPath) log(`  html          ${result.htmlPath}`);
+    emit(
+      flagBool(args, "json"),
+      {
+        output: result.outputPath,
+        format,
+        bytes: result.bytes,
+        contentHeightPx: result.contentHeightPx,
+        pageCount: result.pageCount,
+        onePage: result.onePage,
+        durationMs: Date.now() - started,
+        htmlPath: result.htmlPath ?? null,
+        warnings: result.warnings,
+      },
+      () => {
+        log(`${c.green("rendered")} ${result.outputPath}`);
+        log(`  size          ${formatBytes(result.bytes)}`);
+        log(`  content       ${result.contentHeightPx}px (~${result.pageCount} A4 page${result.pageCount > 1 ? "s" : ""})`);
+        log(`  one page      ${
+          result.onePage.isScaled
+            ? `${(result.onePage.scale * 100).toFixed(1)}% scale${result.onePage.cannotFit ? " (cannot fit)" : ""}`
+            : "not needed"
+        }`);
+        log(`  duration      ${Date.now() - started}ms`);
+        if (result.htmlPath) log(`  html          ${result.htmlPath}`);
+      }
+    );
+
     for (const message of result.warnings) warn(message);
     return 0;
   });
@@ -540,7 +819,9 @@ defineCommand("export-md", "Export the resume as Markdown", async (args) => {
   const file = requireFile(args.positionals[0], "usage: magic-resume export-md <resume.json> [-o out.md]");
   const resume = await loadResume(file);
   const markdown = generateResumeMarkdown(resume);
-  const output = resolve(flagString(args, "output") ?? flagString(args, "o") ?? defaultOutputName(file, "md"));
+  const output = userPath(
+    flagString(args, "output") ?? flagString(args, "o") ?? defaultOutputName(file, "md")
+  );
 
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, `${markdown}\n`, "utf8");
@@ -556,20 +837,34 @@ defineCommand("validate", "Check that a resume file parses and normalises", asyn
   if (!resume.basic.name) notes.push("basic.name is empty");
   if (!resume.menuSections.some((section) => section.enabled)) notes.push("no enabled sections");
   for (const section of resume.menuSections.filter((item) => item.enabled)) {
-    if (countSectionItems(resume, section.id) === 0) {
+    if (countItems(resume, section.id) === 0) {
       notes.push(`section "${section.id}" is enabled but has no content`);
     }
   }
 
-  log(`${c.green("valid")} ${file}`);
-  log(`  ${resume.menuSections.length} sections, ${resume.experience.length} experience, ${resume.projects.length} projects, ${resume.education.length} education`);
-  for (const note of notes) warn(note);
+  emit(
+    flagBool(args, "json"),
+    {
+      file,
+      valid: true,
+      sections: resume.menuSections.length,
+      experience: resume.experience.length,
+      projects: resume.projects.length,
+      education: resume.education.length,
+      notes,
+    },
+    () => {
+      log(`${c.green("valid")} ${file}`);
+      log(`  ${resume.menuSections.length} sections, ${resume.experience.length} experience, ${resume.projects.length} projects, ${resume.education.length} education`);
+      for (const note of notes) warn(note);
+    }
+  );
   return 0;
 });
 
 const defaultOutputName = (input: string, extension: string): string => {
   const base = basename(input).replace(/\.[^.]+$/, "");
-  return join(dirname(resolve(input)), `${base}.${extension}`);
+  return join(dirname(userPath(input)), `${base}.${extension}`);
 };
 
 const formatBytes = (bytes: number): string =>
@@ -584,10 +879,35 @@ defineCommand("help", "Show this help", async () => {
   log("  magic-resume <command> [options]");
   log("");
   log(c.bold("Commands"));
+  const groups: [string, string[]][] = [
+    ["read", ["read", "schema", "ls", "show", "validate", "diff", "templates", "fonts"]],
+    ["edit", ["init", "set", "add", "remove", "move", "clear", "template", "section"]],
+    ["generate", ["ops", "variant"]],
+    ["render", ["render", "preview", "export-md"]],
+    ["help", ["help"]],
+  ];
   const width = Math.max(...Object.keys(commands).map((name) => name.length));
-  for (const [name, command] of Object.entries(commands)) {
-    log(`  ${name.padEnd(width + 2)}${command.summary}`);
+  const listed = new Set<string>();
+  for (const [group, names] of groups) {
+    log(`  ${c.dim(group)}`);
+    for (const name of names) {
+      const command = commands[name];
+      if (!command) continue;
+      listed.add(name);
+      log(`    ${name.padEnd(width + 2)}${command.summary}`);
+    }
   }
+  for (const [name, command] of Object.entries(commands)) {
+    if (listed.has(name)) continue;
+    log(`    ${name.padEnd(width + 2)}${command.summary}`);
+  }
+  log("");
+  log(c.bold("Agent workflow"));
+  log("  1. magic-resume read resume.json            # indexed text view");
+  log("  2. magic-resume schema                      # paths, ops, enums");
+  log("  3. write ops.json describing the changes");
+  log("  4. magic-resume variant resume.json tailored.json --ops ops.json -f pdf");
+  log(c.dim("  docs/agent-workflow.md has the full guide; add --json for machine output."));
   log("");
   log(c.bold("Examples"));
   log("  magic-resume init resume.json --blank");
@@ -595,12 +915,14 @@ defineCommand("help", "Show this help", async () => {
   log('  magic-resume set resume.json --set globalSettings.lineHeight=1.6 --set basic.email=a@b.com');
   log('  magic-resume set resume.json experience.0.details @details.md');
   log('  magic-resume add resume.json experience --company "字节跳动" --position "前端" --date "2021.07 - 2024.12"');
+  log("  magic-resume clear resume.json projects");
   log("  magic-resume template resume.json swiss");
   log("  magic-resume render resume.json -o out.pdf");
   log("  magic-resume preview resume.json");
   log("");
   log(c.dim("Rich-text fields (skillContent, selfEvaluationContent, details, description) accept"));
   log(c.dim("plain text, Markdown or HTML; use @file to read the value from a file."));
+  log(c.dim("Every command supports --json for machine-readable output."));
   return 0;
 });
 
@@ -620,6 +942,7 @@ const main = async (): Promise<number> => {
     return commands.help.run(args);
   }
 
+  pinWorkingDirectory();
   return command.run(args);
 };
 
@@ -628,7 +951,7 @@ main()
     process.exitCode = code;
   })
   .catch((error: unknown) => {
-    if (error instanceof CliError || error instanceof EditError) {
+    if (error instanceof CliError || error instanceof EditError || error instanceof OpsError) {
       process.stderr.write(`${c.red("error")} ${error.message}\n`);
       process.exitCode = 1;
       return;

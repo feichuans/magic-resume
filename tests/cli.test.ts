@@ -21,6 +21,8 @@ import {
   unwrapResume,
 } from "../src/cli/resume-data";
 import { computeOnePageScale, A4_HEIGHT_PX } from "../src/cli/browser-render";
+import { OpsError, applyOps, clearSection, type ResumeOp } from "../src/cli/resume-ops";
+import { buildSchema, diffResumes, renderResumeText } from "../src/cli/resume-read";
 
 const editOptions = { baseDir: process.cwd() };
 
@@ -278,4 +280,122 @@ test("computeOnePageScale mirrors the workbench thresholds", () => {
   const wayOver = computeOnePageScale(usable * 3 + 2 * pagePadding, pagePadding);
   assert.equal(wayOver.scale, 0.9);
   assert.equal(wayOver.cannotFit, true);
+});
+
+// --------------------------------------------------------- agent interface --
+
+test("renderResumeText exposes indices, hides JSON noise and flattens rich text", () => {
+  const resume = getSampleResume("zh");
+  const text = renderResumeText(resume);
+
+  assert.match(text, /^resume: /m);
+  assert.match(text, /sections \(render order/);
+  assert.match(text, /== experience \(工作经验\) ==/);
+  assert.match(text, /\[0\] 字节跳动 \| 高级前端工程师/);
+  assert.match(text, /^ {4}- {3}负责抖音创作者平台/m);
+
+  // The agent should not be reading editor bookkeeping.
+  assert.ok(!text.includes("fieldOrder"));
+  assert.ok(!text.includes("photoConfig"));
+  assert.ok(!text.includes("draggingProjectId"));
+  assert.ok(!text.includes("<ul>"));
+  assert.ok(!text.includes("<li>"));
+});
+
+test("renderResumeText marks hidden sections and hidden items", () => {
+  const resume = getBlankResume("zh");
+  resume.menuSections.find((section) => section.id === "education")!.enabled = false;
+  addItem(
+    resume,
+    "experience",
+    { company: "Hidden Co", position: "Dev", date: "2020", visible: "false" },
+    { baseDir: process.cwd() }
+  );
+
+  const text = renderResumeText(resume);
+  assert.match(text, /\[off\] education/);
+  assert.match(text, /\[0\] \[off\] Hidden Co/);
+});
+
+test("buildSchema lists paths, item fields and enums", () => {
+  const schema = buildSchema();
+
+  assert.ok(schema.paths.includes("experience[i].details"));
+  assert.deepEqual(schema.items.projects.required, ["name"]);
+  assert.ok(schema.enums.templateId.includes("swiss"));
+  assert.ok(schema.enums.fontFamily.length >= 4);
+  assert.ok(schema.richTextFields.includes("skillContent"));
+});
+
+test("diffResumes reports field-level changes only", () => {
+  const before = getBlankResume("zh");
+  const after = JSON.parse(JSON.stringify(before)) as typeof before;
+  after.basic.name = "张三";
+  after.updatedAt = new Date(Date.now() + 1000).toISOString();
+
+  const entries = diffResumes(before, after);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].path, "basic.name");
+  assert.equal(entries[0].from, "");
+  assert.equal(entries[0].to, "张三");
+});
+
+test("applyOps applies a batch and leaves the input untouched", async () => {
+  const resume = getBlankResume("zh");
+  const ops: ResumeOp[] = [
+    { op: "set", path: "basic.name", value: "张三" },
+    { op: "set", path: "skillContent", value: "- React\n- TypeScript" },
+    { op: "template", templateId: "swiss" },
+    { op: "add", section: "projects", fields: { name: "P1", description: "- did it" } },
+    { op: "section", sectionId: "selfEvaluation", enabled: true, order: 3 },
+  ];
+
+  const { resume: next, applied } = await applyOps(resume, ops, { baseDir: process.cwd() });
+
+  assert.equal(applied.length, 5);
+  assert.equal(resume.basic.name, "");
+  assert.equal(next.basic.name, "张三");
+  assert.match(next.skillContent, /<ul>/);
+  assert.equal(next.templateId, "swiss");
+  assert.equal(next.projects.length, 1);
+  assert.ok(next.menuSections.some((section) => section.id === "selfEvaluation"));
+});
+
+test("applyOps is atomic: a failing op leaves nothing applied", async () => {
+  const resume = getBlankResume("zh");
+  const ops: ResumeOp[] = [
+    { op: "set", path: "basic.name", value: "张三" },
+    { op: "set", path: "basic.doesNotExist", value: "x" },
+  ];
+
+  await assert.rejects(() => applyOps(resume, ops, { baseDir: process.cwd() }), OpsError);
+  assert.equal(resume.basic.name, "");
+});
+
+test("applyOps resolves @file for add fields", async () => {
+  const resume = getBlankResume("zh");
+  const { resume: next } = await applyOps(
+    resume,
+    [{ op: "add", section: "experience", fields: { company: "C", details: "@tests/fixtures/details.md" } }],
+    { baseDir: process.cwd() }
+  );
+
+  assert.match(next.experience[0].details, /<li>主导核心功能方案设计<\/li>/);
+});
+
+test("applyOps rejects unknown ops with the index of the failure", async () => {
+  const resume = getBlankResume("zh");
+  await assert.rejects(
+    () => applyOps(resume, [{ op: "nope" }], { baseDir: process.cwd() }),
+    /op #0 \(nope\)/
+  );
+});
+
+test("clearSection empties one section and keeps the rest", () => {
+  const resume = getSampleResume("zh");
+  clearSection(resume, "projects");
+
+  assert.equal(resume.projects.length, 0);
+  assert.ok(resume.experience.length > 0);
+  assert.ok(resume.menuSections.some((section) => section.id === "projects"));
 });

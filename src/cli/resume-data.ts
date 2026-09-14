@@ -401,5 +401,10 @@ export const normalizeResume = (raw: unknown, options: NormalizeOptions = {}): R
   return resume;
 };
 
+/** Re-normalises a resume that was mutated in memory, keeping its identity. */
+export const renormalizeResume = (resume: ResumeData): ResumeData => normalizeResume(resume, {
+  templateId: resume.templateId,
+});
+
 export const normalizeRichText = (value: unknown): string => asString(value);
 export const toStringArray = asStringArray;

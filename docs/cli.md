@@ -4,6 +4,8 @@
 
 CLI 复用网页版的模板组件、Tailwind 样式和字体，所以同一份 `resume.json` 在 CLI 和网页工作台里渲染结果一致。
 
+**给 Agent 用**：先看 [docs/agent-workflow.md](./agent-workflow.md)，那是面向模型的工作流（`read` / `schema` / `ops` / `variant`）。
+
 ## 快速开始
 
 ```bash
@@ -36,17 +38,35 @@ magic-resume add resume.json experience --company "字节跳动" --position "前
   --date "2021.07 - 2024.12" --details @details.md
 magic-resume remove resume.json experience 0
 magic-resume move resume.json experience 0 1
+magic-resume clear resume.json projects
+
 # 模板与模块
 magic-resume template resume.json swiss
 magic-resume section resume.json certificates --enable --order 5   # 标准模块不在空白简历里，第一次用会自动注册
 magic-resume section resume.json education --disable
 
 # 查看
+magic-resume read resume.json      # 带下标的紧凑视图（Agent 用这个）
 magic-resume ls resume.json
 magic-resume show resume.json basic
 magic-resume validate resume.json
+magic-resume diff resume.json other.json
 magic-resume export-md resume.json -o resume.md
 ```
+
+### 批量修改
+
+Agent 场景下一次改十几个字段时，用 `ops` 或 `variant` 一次性提交，避免多次启动进程：
+
+```bash
+magic-resume ops resume.json --ops ops.json --dry-run   # 预览
+magic-resume ops resume.json --ops ops.json             # 原地修改，原子写入
+magic-resume variant resume.json tailored.json --ops ops.json -f pdf   # 生成变体并渲染
+```
+
+ops 语法见 [docs/agent-workflow.md](./agent-workflow.md)，也可用 `magic-resume schema` 查询。
+
+所有命令都支持 `--json`，输出单个机器可读对象。
 
 ### 路径写法
 
@@ -128,3 +148,12 @@ pnpm install:playwright   # playwright install chromium
 pnpm test:cli        # tests/cli.test.ts
 pnpm test:ai         # 原有测试
 ```
+
+## 命令速查
+
+| 分组 | 命令 |
+| --- | --- |
+| 读取 | `read` `schema` `ls` `show` `validate` `diff` `templates` `fonts` |
+| 编辑 | `init` `set` `add` `remove` `move` `clear` `template` `section` |
+| 生成 | `ops` `variant` |
+| 渲染 | `render` `preview` `export-md` |
