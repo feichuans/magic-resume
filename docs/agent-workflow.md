@@ -102,9 +102,12 @@ magic-resume ops resume.json --ops ops.json --dry-run
 magic-resume read resume.json --json
 magic-resume ls resume.json --json
 magic-resume diff a.json b.json --json
+magic-resume add resume.json experience --company X --json   # 返回新条目的 index
 magic-resume render resume.json -o out.pdf --json
 magic-resume variant base.json v.json --ops - --json
 ```
+
+写操作返回的结构可以直接用于后续操作，例如 `add` 返回 `{"section":"experience","index":0,"id":"..."}`，`remove` 返回被删除的完整条目。
 
 ```json
 {"output":"/abs/v.pdf","format":"pdf","bytes":1186827,"pageCount":1,

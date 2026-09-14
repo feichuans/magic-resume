@@ -16,6 +16,7 @@ import {
   normalizeSectionName,
   removeItem,
   resolveValue,
+  type SetResult,
 } from "./resume-edit";
 import {
   detectLocale,
@@ -257,9 +258,21 @@ defineCommand("init", "Create a resume JSON file (sample content or empty)", asy
   if (templateId) applyTemplate(resume, templateId);
 
   await saveResume(output, resume);
-  log(`${c.green("created")} ${output}`);
-  log(`  template: ${resume.templateId}`);
-  log(`  sections: ${resume.menuSections.map((section) => section.id).join(", ")}`);
+  emit(
+    flagBool(args, "json"),
+    {
+      output,
+      templateId: resume.templateId,
+      blank: flagBool(args, "blank"),
+      locale,
+      sections: resume.menuSections.map((section) => section.id),
+    },
+    () => {
+      log(`${c.green("created")} ${output}`);
+      log(`  template: ${resume.templateId}`);
+      log(`  sections: ${resume.menuSections.map((section) => section.id).join(", ")}`);
+    }
+  );
   return 0;
 });
 
@@ -524,7 +537,7 @@ defineCommand("set", "Set a field (dot/bracket paths, markdown or plain text for
   const resume = await loadResume(file);
   const format = flagString(args, "format", "auto") as "auto" | "text" | "markdown" | "html" | "json";
   const baseDir = dirname(file);
-  const results = [];
+  const results: SetResult[] = [];
 
   for (const operation of operations) {
     const separator = operation.indexOf("=");
@@ -539,12 +552,14 @@ defineCommand("set", "Set a field (dot/bracket paths, markdown or plain text for
   }
 
   await saveResume(file, resume);
-  for (const result of results) {
-    const preview = typeof result.value === "string" && result.value.length > 60
-      ? `${result.value.slice(0, 57)}...`
-      : String(result.value);
-    log(`${c.green("set")} ${result.path} = ${preview}`);
-  }
+  emit(flagBool(args, "json"), { file, changed: results.map((r) => r.path) }, () => {
+    for (const result of results) {
+      const preview = typeof result.value === "string" && result.value.length > 60
+        ? `${result.value.slice(0, 57)}...`
+        : String(result.value);
+      log(`${c.green("set")} ${result.path} = ${preview}`);
+    }
+  });
   return 0;
 });
 
@@ -582,7 +597,11 @@ defineCommand("add", "Append an item to a section", async (args) => {
   });
 
   await saveResume(file, resume);
-  log(`${c.green("added")} ${section} item ${JSON.stringify((item as { id: string }).id)}`);
+  const addedId = (item as { id: string }).id;
+  const index = countItems(resume, section === "custom" ? args.positionals[2] ?? "" : section) - 1;
+  emit(flagBool(args, "json"), { file, section, index, id: addedId }, () => {
+    log(`${c.green("added")} ${section}[${index}] (${addedId})`);
+  });
   return 0;
 });
 
@@ -600,7 +619,11 @@ defineCommand("remove", "Delete an item from a section by index", async (args) =
   const resume = await loadResume(file);
   const removed = removeItem(resume, section, index, args.positionals[3]);
   await saveResume(file, resume);
-  log(`${c.green("removed")} ${section}[${index}]: ${JSON.stringify(removed).slice(0, 100)}`);
+  emit(
+    flagBool(args, "json"),
+    { file, section, index, removed },
+    () => log(`${c.green("removed")} ${section}[${index}]: ${JSON.stringify(removed).slice(0, 100)}`)
+  );
   return 0;
 });
 
@@ -619,7 +642,9 @@ defineCommand("move", "Reorder an item inside a section", async (args) => {
   const resume = await loadResume(file);
   moveItem(resume, section, from, to, args.positionals[4]);
   await saveResume(file, resume);
-  log(`${c.green("moved")} ${section}[${from}] -> ${to}`);
+  emit(flagBool(args, "json"), { file, section, from, to }, () =>
+    log(`${c.green("moved")} ${section}[${from}] -> ${to}`)
+  );
   return 0;
 });
 
@@ -631,7 +656,11 @@ defineCommand("template", "Switch template (also updates theme colour and spacin
   const resume = await loadResume(file);
   applyTemplate(resume, templateId);
   await saveResume(file, resume);
-  log(`${c.green("template")} ${templateId}`);
+  emit(
+    flagBool(args, "json"),
+    { file, templateId: resume.templateId, globalSettings: resume.globalSettings, layout: resume.basic.layout },
+    () => log(`${c.green("template")} ${templateId}`)
+  );
   return 0;
 });
 
@@ -644,7 +673,9 @@ defineCommand("clear", "Empty a section (keep the section, drop its items)", asy
   const before = countItems(resume, sectionId);
   clearSection(resume, sectionId, args.positionals[2]);
   await saveResume(file, resume);
-  log(`${c.green("cleared")} ${sectionId} (${before} items removed)`);
+  emit(flagBool(args, "json"), { file, section: sectionId, removed: before }, () =>
+    log(`${c.green("cleared")} ${sectionId} (${before} items removed)`)
+  );
   return 0;
 });
 
@@ -667,10 +698,15 @@ defineCommand("section", "Enable, disable, rename or reorder a section", async (
   });
 
   await saveResume(file, resume);
-  log(
-    `${c.green(result.created ? "created" : "updated")} section ${result.section.id}: ${JSON.stringify(
-      result.section
-    )}`
+  emit(
+    flagBool(args, "json"),
+    { file, created: result.created, section: result.section },
+    () =>
+      log(
+        `${c.green(result.created ? "created" : "updated")} section ${result.section.id}: ${JSON.stringify(
+          result.section
+        )}`
+      )
   );
   return 0;
 });
