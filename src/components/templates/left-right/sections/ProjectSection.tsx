@@ -17,8 +17,6 @@ interface ProjectSectionProps {
 const ProjectSection: React.FC<ProjectSectionProps> = ({ projects, globalSettings, showTitle = true }) => {
     const locale = useLocale();
     const visibleProjects = projects?.filter((p) => p.visible);
-    const centerSubtitle = globalSettings?.centerSubtitle;
-    const flexLayout = globalSettings?.flexibleHeaderLayout;
 
     return (
         <SectionWrapper sectionId="projects" style={{ marginTop: `${globalSettings?.sectionSpacing || 24}px` }}>
@@ -27,36 +25,41 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({ projects, globalSetting
                 <AnimatePresence mode="popLayout">
                     {visibleProjects.map((project) => {
                         const projectLink = getProjectLinkMeta(project, {
-                            preferFullUrl: centerSubtitle,
+                            preferFullUrl: true,
                         });
 
                         return (
-                        <motion.div key={project.id} style={{ marginTop: `${globalSettings?.paragraphSpacing}px` }}>
-                            <motion.div className="flex items-center gap-2">
-                                <div className={`flex items-center gap-2 ${flexLayout ? "" : "flex-[1.5]"}`}>
-                                    <h3 className="font-bold" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>{project.name}</h3>
-                                </div>
-                                {projectLink && !centerSubtitle && (
-                                    <a href={projectLink.href} target="_blank" rel="noopener noreferrer"
-                                        className={`underline ${flexLayout ? "" : "flex-1"}`} title={projectLink.title} style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
-                                        {projectLink.label}
-                                    </a>
-                                )}
-                                {!projectLink && !centerSubtitle && !flexLayout && <div className="flex-1" />}
-                                {centerSubtitle && (
-                                    <motion.div layout="position" className={`text-subtitleFont ${flexLayout ? "ml-[16px]" : "flex-1"}`} style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
-                                        {project.role}
-                                    </motion.div>
-                                )}
-                                <div className={`text-subtitleFont shrink-0 ${flexLayout ? "ml-auto" : "flex-1 text-right"}`} style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                        <motion.div
+                            key={project.id}
+                            className="resume-entry"
+                            style={{ marginTop: `${globalSettings?.paragraphSpacing}px` }}
+                        >
+                            {/*
+                              ATS parsers (Beisen / Feishu / Moka) split entries on
+                              "entity + date" lines. Keep name+date on line 1, role on
+                              line 2, and the URL labelled on line 3 — never insert a
+                              bare URL between two project titles.
+                            */}
+                            <motion.div className="flex items-baseline justify-between gap-2">
+                                <h3 className="font-bold min-w-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                                    {project.name}
+                                </h3>
+                                <div className="text-subtitleFont shrink-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
                                     {formatDateString(project.date, locale)}
                                 </div>
                             </motion.div>
-                            {project.role && !centerSubtitle && (
-                                <motion.div layout="position" className="text-subtitleFont" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>{project.role}</motion.div>
+                            {project.role && (
+                                <motion.div layout="position" className="text-subtitleFont" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                                    {project.role}
+                                </motion.div>
                             )}
-                            {projectLink && centerSubtitle && (
-                                <a href={projectLink.href} target="_blank" rel="noopener noreferrer" className="underline" title={projectLink.title} style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>{projectLink.label}</a>
+                            {projectLink && (
+                                <div className="text-subtitleFont" style={{ fontSize: `${globalSettings?.baseFontSize || 14}px` }}>
+                                    项目地址：
+                                    <a href={projectLink.href} target="_blank" rel="noopener noreferrer" className="underline" title={projectLink.title}>
+                                        {projectLink.href}
+                                    </a>
+                                </div>
                             )}
                             {project.description && (
                                 <motion.div layout="position" className="mt-1 text-baseFont"

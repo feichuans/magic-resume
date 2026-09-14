@@ -95,6 +95,14 @@ body {
 #${PREVIEW_ELEMENT_ID} a {
   color: inherit;
 }
+#${PREVIEW_ELEMENT_ID} h2 {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+#${PREVIEW_ELEMENT_ID} .resume-entry {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
 #${PREVIEW_ELEMENT_ID} .min-h-screen,
 #${PREVIEW_ELEMENT_ID} .min-h-full {
   min-height: 0 !important;
