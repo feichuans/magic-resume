@@ -40,6 +40,7 @@ import {
   renderResumeText,
 } from "./resume-read";
 import { ResumeRenderer, readResumeFile } from "./renderer";
+import { inspectResumePdf } from "./ats";
 
 const VERSION = "0.1.0";
 
@@ -864,6 +865,41 @@ defineCommand("preview", "Serve the rendered resume on localhost", async (args) 
   });
 });
 
+defineCommand("ats", "Parse a rendered PDF the way an ATS would and report text-layer issues", async (args) => {
+  const input = args.positionals[0];
+  if (!input) throw new CliError("usage: magic-resume ats <resume.json|file.pdf>");
+
+  const absolute = userPath(input);
+  if (!existsSync(absolute)) throw new CliError(`file not found: ${absolute}`);
+
+  let pdfPath = absolute;
+  if (absolute.toLowerCase().endsWith(".json")) {
+    const resume = await loadResume(absolute);
+    const locale = resolveLocale(args, resume);
+    pdfPath = absolute.replace(/\.json$/i, ".ats.pdf");
+    await withRenderer(async (renderer) => {
+      await renderer.render(resume, {
+        format: "pdf",
+        locale,
+        onePage: false,
+        outputPath: pdfPath,
+        onProgress: (message) => process.stderr.write(`${c.dim(message)}\n`),
+      });
+    });
+  }
+
+  const report = await inspectResumePdf(pdfPath);
+  emit(flagBool(args, "json"), { pdf: pdfPath, ...report, text: flagBool(args, "dump") ? report.text : undefined }, () => {
+    const mark = report.score >= 80 ? c.green : report.score >= 50 ? c.yellow : c.red;
+    log(`${mark(`ATS ${report.score}/100`)}  ${basename(pdfPath)}  ${report.pages} page${report.pages === 1 ? "" : "s"}  ${report.chars} chars`);
+    for (const finding of report.findings) {
+      const tag = finding.severity === "error" ? c.red("error") : finding.severity === "warn" ? c.yellow("warn ") : c.dim("info ");
+      log(`  ${tag}  ${finding.message}`);
+    }
+  });
+  return report.findings.some((item) => item.severity === "error") ? 2 : 0;
+});
+
 defineCommand("export-md", "Export the resume as Markdown", async (args) => {
   const file = requireFile(args.positionals[0], "usage: magic-resume export-md <resume.json> [-o out.md]");
   const resume = await loadResume(file);
@@ -929,7 +965,7 @@ defineCommand("help", "Show this help", async () => {
   log("");
   log(c.bold("Commands"));
   const groups: [string, string[]][] = [
-    ["read", ["read", "schema", "ls", "show", "validate", "diff", "templates", "fonts"]],
+    ["read", ["read", "schema", "ls", "show", "validate", "ats", "diff", "templates", "fonts"]],
     ["edit", ["init", "set", "add", "remove", "move", "clear", "template", "section"]],
     ["generate", ["ops", "variant"]],
     ["render", ["render", "preview", "export-md"]],

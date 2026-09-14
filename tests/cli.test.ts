@@ -438,3 +438,32 @@ test("applyOps writes to a new file and never touches the source", async () => {
   assert.equal(next.basic.name, "张三");
   assert.notEqual(next, resume);
 });
+
+test("evaluateAtsText flags icon-only website/github labels and missing contact", async () => {
+  const { evaluateAtsText, scoreAtsFindings } = await import("../src/cli/ats");
+  const bad = evaluateAtsText("方统义 Agent 前端开发 个人网站 Github 北京智精灵", 2);
+  const ids = bad.map((item) => item.id);
+  assert.ok(ids.includes("email"));
+  assert.ok(ids.includes("phone"));
+  assert.ok(ids.includes("url"));
+  assert.ok(ids.includes("website-label"));
+  assert.ok(ids.includes("github-label"));
+  assert.ok(ids.includes("headings"));
+  assert.ok(scoreAtsFindings(bad) < 50);
+});
+
+test("evaluateAtsText accepts a well-formed text layer", async () => {
+  const { evaluateAtsText, scoreAtsFindings } = await import("../src/cli/ats");
+  const text = `方统义
+邮箱: feichuan05@gmail.com
+电话: 17720291948
+个人网站: https://feichuans.com
+Github: https://github.com/feichuans
+教育经历 湖北商贸学院
+专业技能 TypeScript React
+实习经历 北京智精灵
+项目经历 Buffin https://github.com/buffin-ai/buffin`;
+  const findings = evaluateAtsText(text, 2);
+  assert.equal(scoreAtsFindings(findings), 100);
+  assert.equal(findings[0].id, "ok");
+});

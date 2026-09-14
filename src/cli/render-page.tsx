@@ -89,6 +89,11 @@ body {
   box-sizing: border-box;
   background: #ffffff;
   font-family: ${options.fontFamily || "inherit"};
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0;
+}
+#${PREVIEW_ELEMENT_ID} a {
+  color: inherit;
 }
 #${PREVIEW_ELEMENT_ID} .min-h-screen,
 #${PREVIEW_ELEMENT_ID} .min-h-full {
