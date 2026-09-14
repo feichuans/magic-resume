@@ -424,3 +424,17 @@ test("computeOnePageScale cannotFit only reflects the raw height ratio", () => {
   assert.equal(fits.scale, 0.72);
   assert.equal(fits.cannotFit, false);
 });
+
+test("applyOps writes to a new file and never touches the source", async () => {
+  const resume = getBlankResume("zh");
+  const before = JSON.stringify(resume);
+  const { resume: next } = await applyOps(
+    resume,
+    [{ op: "set", path: "basic.name", value: "张三" }],
+    { baseDir: process.cwd() }
+  );
+
+  assert.equal(JSON.stringify(resume), before);
+  assert.equal(next.basic.name, "张三");
+  assert.notEqual(next, resume);
+});

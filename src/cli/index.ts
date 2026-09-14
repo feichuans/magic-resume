@@ -434,6 +434,17 @@ defineCommand("variant", "Generate a tailored copy of a resume from a batch of o
   }
 
   const opsFile = flagString(args, "ops");
+  // Refuse to clobber the inputs: an ops file written to <out.json> would be
+  // silently destroyed by the resume that replaces it.
+  if (opsFile && opsFile !== "-" && userPath(opsFile) === targetPath) {
+    throw new CliError(
+      `--ops and <out.json> point at the same file (${targetPath}); the ops file would be overwritten`
+    );
+  }
+  if (source === targetPath) {
+    throw new CliError(`<out.json> must differ from the base resume (${source})`);
+  }
+
   const resume = await loadResume(source);
   const locale = resolveLocale(args, resume);
 
