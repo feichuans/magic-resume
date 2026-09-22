@@ -518,8 +518,12 @@ AnotherProject 前端贡献者 2026/02 - 2026/06
 https://github.com/example/another/pull/1`;
   const mergedCard = parseAtsCard(merged);
   assert.equal(mergedCard.projects.length, 2);
+  // A mode with a project link line carries the URL outside the description.
+  assert.equal(mergedCard.projects[0].url, "https://github.com/example/platform");
+  assert.equal(mergedCard.projects[1].url, "https://github.com/example/another/pull/1");
+  assert.ok(!mergedCard.projects[0].body.includes("https://"), "URL must not leak into the body");
   const mergedIds = evaluateAtsText(merged, 2, mergedCard).map((item) => item.id);
-  assert.ok(mergedIds.includes("project-unlabeled-url"));
+  assert.ok(!mergedIds.includes("project-count-mismatch"), "two date lines and two entries must agree");
 });
 
 test("parseAtsCard reads the role whether it shares the title row or sits below", async () => {
@@ -545,17 +549,30 @@ test("parseAtsCard reads the role whether it shares the title row or sits below"
   assert.ok(!fromStacked.body.includes("前端核心贡献者"), "role must not leak into the body");
 });
 
-test("parseAtsCard reads labelled role and link lines", async () => {
+test("parseAtsCard reads a labelled role and a bare URL line", async () => {
   const { parseAtsCard } = await import("../src/cli/ats");
-  // The renderer labels both fields so a parser keying on "label + colon" does
-  // not have to guess which bare value is the role.
-  const labelled = `项目经历\nExample · 内部交付平台 2026/06 - 2026/09\n项目角色：前端核心贡献者\n项目链接：https://github.com/example/platform\n技术栈：TypeScript`;
+  // The role keeps its label so a parser keying on "label + colon" does not
+  // have to guess. The URL is bare: some platforms leave a link field empty
+  // when the value carries a Chinese label prefix.
+  const labelled = `项目经历\nExample · 内部交付平台 2026/06 - 2026/09\n项目角色：前端核心贡献者\nhttps://github.com/example/platform\n技术栈：TypeScript`;
   const p = parseAtsCard(labelled).projects[0];
   assert.equal(p.name, "Example · 内部交付平台");
   assert.equal(p.role, "前端核心贡献者");
   assert.equal(p.date, "2026/06 - 2026/09");
   assert.equal(p.url, "https://github.com/example/platform");
   assert.ok(!p.body.includes("项目角色"), "the role label must not leak into the body");
-  assert.ok(!p.body.includes("项目链接"), "the link label must not leak into the body");
+  assert.ok(!p.body.includes("https://"), "the URL must not leak into the body");
   assert.ok(p.body.includes("技术栈"), "description must survive");
+});
+
+test("parseAtsCard takes the first URL of each entry, not one shared across entries", async () => {
+  const { parseAtsCard } = await import("../src/cli/ats");
+  // A global regex carries `lastIndex` between `test()` calls, which made the
+  // second entry miss its own URL depending on how many earlier lines matched.
+  const two = `项目经历\nFirst 2026/01 - 2026/02\n项目角色：作者\nhttps://github.com/example/first\n描述一\nSecond 2026/03 - 2026/04\n项目角色：作者\nhttps://github.com/example/second\n描述二`;
+  const projects = parseAtsCard(two).projects;
+  assert.equal(projects.length, 2);
+  assert.equal(projects[0].url, "https://github.com/example/first");
+  assert.equal(projects[1].url, "https://github.com/example/second");
+  assert.ok(!projects[1].body.includes("http"), "the second URL must not fall into the body");
 });

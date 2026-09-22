@@ -60,7 +60,6 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({ projects, globalSetting
                             )}
                             {projectLink && (
                                 <div className="text-subtitleFont" style={{ fontSize: `${globalSettings?.baseFontSize || 14}px` }}>
-                                    项目链接：
                                     <a href={projectLink.href} target="_blank" rel="noopener noreferrer" className="underline" title={projectLink.title}>
                                         {projectLink.href}
                                     </a>

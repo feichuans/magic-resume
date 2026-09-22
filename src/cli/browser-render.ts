@@ -151,6 +151,12 @@ export interface RenderRequest {
   minOnePageScale?: number;
   /** Screenshot device scale factor for PNG output. */
   imageScale?: number;
+  /**
+   * Strip URI annotations from the PDF, keeping each URL as plain text. Some
+   * parsers discard an anchored run outright, or fail to file it under a link
+   * field, so a text-only URL is the more portable form.
+   */
+  flatLinks?: boolean;
   browserChannel?: string;
 }
 
@@ -297,7 +303,7 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
     if (request.pdf) {
       // Padding moves into the @page margin so every page keeps the same gutter.
       await page.evaluate(
-        ({ id, padding, scale, scaled }) => {
+        ({ id, padding, scale, scaled, flatLinks }) => {
           const root = document.getElementById(id);
           if (!root) return;
           root.style.setProperty("padding", "0", "important");
@@ -306,12 +312,22 @@ export const renderResume = async (request: RenderRequest): Promise<RenderResult
             root.style.setProperty("zoom", String(scale));
             root.style.setProperty("width", "100%", "important");
           }
+          if (flatLinks) {
+            // Chrome turns every <a href> into a URI annotation. A parser that
+            // strips anchors loses the URL, so drop the href and keep the text.
+            root.querySelectorAll("a[href]").forEach((anchor) => {
+              anchor.removeAttribute("href");
+              anchor.removeAttribute("target");
+              anchor.removeAttribute("rel");
+            });
+          }
         },
         {
           id: request.elementId,
           padding: request.pagePadding,
           scale: onePage.scale,
           scaled: onePage.isScaled,
+          flatLinks: request.flatLinks === true,
         }
       );
       await page.waitForTimeout(120);

@@ -50,6 +50,9 @@ const HEADING_SET = new Set<string>(STANDARD_HEADINGS);
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE_RE = /1[3-9]\d{9}/;
 const URL_RE = /https?:\/\/[^\s)）]+/gi;
+/** Same pattern without `/g`: a global regex keeps `lastIndex` between calls,
+ * so `test()` on it would skip matches depending on call order. */
+const URL_TEST_RE = /https?:\/\/[^\s)）]+/i;
 const LIGATURE_RE = /[ﬁﬂﬀﬃﬄ]/;
 const DATE_RE =
   /\d{4}\s*[./年-]\s*\d{1,2}(?:\s*[-–—~至到]\s*(?:\d{4}\s*[./年-]\s*\d{1,2}|至今|现在|present))?/i;
@@ -171,7 +174,7 @@ const splitEntries = (body: string): AtsEntry[] => {
     const chunk = lines.slice(from, to);
     const { name, date, columns } = takeDate(chunk[0] ?? "");
     const rest = chunk.slice(1);
-    const urlLine = rest.find((line) => URL_RE.test(line));
+    const urlLine = rest.find((line) => URL_TEST_RE.test(line));
     const url = urlLine?.match(URL_RE)?.[0];
 
     // Two labelled forms and two unlabelled ones exist in the wild:
@@ -192,7 +195,7 @@ const splitEntries = (body: string): AtsEntry[] => {
       const first = rest[0] ?? "";
       const isRoleLine =
         first &&
-        !URL_RE.test(first) &&
+        !URL_TEST_RE.test(first) &&
         !/^(?:项目)?(?:角色|链接|地址)[：:]/.test(first) &&
         first.length <= 40 &&
         !first.includes("：") &&
@@ -346,22 +349,19 @@ export const evaluateAtsText = (text: string, pages: number, parsed: AtsCard = p
     });
   }
 
-  // Any of these labels marks the URL as a labelled field rather than a bare
-  // URL sitting between two titles.
-  const urlLabelRe = (url: string) =>
-    new RegExp(`(?:项目)?(?:链接|地址)[：:]\\s*${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
-  const unlabeledUrls = parsed.projects.filter((item) => item.url && !urlLabelRe(item.url).test(text));
-  if (unlabeledUrls.length > 0 && parsed.projects.length > 1) {
-    findings.push({
-      id: "project-unlabeled-url",
-      severity: "warn",
-      message: `${unlabeledUrls.length} project URL(s) carry no "项目链接:" label; a bare URL between titles is a common merge point`,
-    });
-  }
-
+  // A bare URL on the line right after a titled entry is the intended layout:
+  // a parser looking for one URL per entry picks it up, and some platforms
+  // reject a Chinese label prefix. Only a URL that swallowed a title is a bug.
   const dateLinesInProjects = linesOf(text.slice(text.indexOf("项目经历") === -1 ? 0 : text.indexOf("项目经历"))).filter(
     (line) => DATE_RE.test(line) && !HEADING_SET.has(line)
   );
+  if (text.includes("项目经历") && dateLinesInProjects.length < parsed.projects.length) {
+    findings.push({
+      id: "project-count-mismatch",
+      severity: "warn",
+      message: `project section has ${dateLinesInProjects.length} date line(s) but parsed ${parsed.projects.length} entry(ies)`,
+    });
+  }
   if (text.includes("项目经历") && dateLinesInProjects.length >= 2 && parsed.projects.length === 1) {
     findings.push({
       id: "project-merged",

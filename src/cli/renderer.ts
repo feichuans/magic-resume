@@ -29,6 +29,11 @@ export interface RenderOptions {
   /** Lowest scale `--one-page` may use (default 0.9, matching the web app). */
   minOnePageScale?: number;
   imageScale?: number;
+  /**
+   * Emit URLs as plain text instead of link annotations. Some parsers drop an
+   * anchored run, so the text-only form is the more portable one.
+   */
+  flatLinks?: boolean;
   browserChannel?: string;
   /** Also write the intermediate HTML next to the output file. */
   saveHtml?: boolean;
@@ -191,6 +196,7 @@ export class ResumeRenderer {
       onePage: options.onePage ?? true,
       minOnePageScale: options.minOnePageScale,
       imageScale: options.imageScale,
+      flatLinks: options.flatLinks,
       browserChannel: options.browserChannel,
     });
 

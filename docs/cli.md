@@ -121,6 +121,7 @@ magic-resume preview resume.json                         # 本地起服务看效
 | `--no-one-page` | 关闭缩放，即使 `autoOnePage` 为真 |
 | `--min-scale` | 缩放下限，默认 0.9，与网页版一致 |
 | `--image-scale` | PNG 的像素倍率，默认 2 |
+| `--flat-links` | URL 只出文本，不生成可点击链接注释（部分解析器会整段丢弃带锚点的文本） |
 | `--html` | 同时写出中间 HTML，便于排查样式问题 |
 | `--browser-channel` | 指定 `chrome` / `msedge` 通道 |
 
