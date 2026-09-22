@@ -174,11 +174,17 @@ const splitEntries = (body: string): AtsEntry[] => {
     const urlLine = rest.find((line) => URL_RE.test(line));
     const url = urlLine?.match(URL_RE)?.[0];
 
-    // Two valid layouts exist in the wild: role as its own column on the title
-    // row, or role alone on the next line. Try the column first, then fall back
-    // to a short unlabelled line directly under the title.
+    // Two labelled forms and two unlabelled ones exist in the wild:
+    //   role as its own column on the title row
+    //   "项目角色：前端核心贡献者"
+    //   a bare role line directly under the title
+    // A labelled value wins; otherwise try the column, then the bare line.
     let role: string | undefined;
-    if (columns.length >= 2) {
+    const roleLine = rest.find((line) => /^(?:项目)?角色[：:]/.test(line));
+    if (roleLine) {
+      role = roleLine.replace(/^(?:项目)?角色[：:]\s*/, "").trim() || undefined;
+    }
+    if (!role && columns.length >= 2) {
       const trailing = columns.slice(1).filter((part) => !DATE_RE.test(part));
       role = trailing[0];
     }
@@ -187,14 +193,14 @@ const splitEntries = (body: string): AtsEntry[] => {
       const isRoleLine =
         first &&
         !URL_RE.test(first) &&
-        !first.startsWith("项目地址") &&
+        !/^(?:项目)?(?:角色|链接|地址)[：:]/.test(first) &&
         first.length <= 40 &&
         !first.includes("：") &&
         !first.includes(":");
       if (isRoleLine) role = first;
     }
 
-    const bodyLines = rest.filter((line) => line !== urlLine && line !== role);
+    const bodyLines = rest.filter((line) => line !== urlLine && line !== roleLine && line !== role);
     entries.push({
       name: name || columnsOf(chunk[0] ?? "")[0] || chunk[0] || "",
       role,
@@ -340,14 +346,16 @@ export const evaluateAtsText = (text: string, pages: number, parsed: AtsCard = p
     });
   }
 
-  const unlabeledUrls = parsed.projects.filter(
-    (item) => item.url && !new RegExp(`项目地址[：:]\\s*${item.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(text)
-  );
+  // Any of these labels marks the URL as a labelled field rather than a bare
+  // URL sitting between two titles.
+  const urlLabelRe = (url: string) =>
+    new RegExp(`(?:项目)?(?:链接|地址)[：:]\\s*${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  const unlabeledUrls = parsed.projects.filter((item) => item.url && !urlLabelRe(item.url).test(text));
   if (unlabeledUrls.length > 0 && parsed.projects.length > 1) {
     findings.push({
       id: "project-unlabeled-url",
       severity: "warn",
-      message: `${unlabeledUrls.length} project URL(s) have no "项目地址:" label; a bare URL between titles is a common merge point`,
+      message: `${unlabeledUrls.length} project URL(s) carry no "项目链接:" label; a bare URL between titles is a common merge point`,
     });
   }
 

@@ -544,3 +544,18 @@ test("parseAtsCard reads the role whether it shares the title row or sits below"
   assert.equal(fromStacked.url, "https://github.com/example/platform");
   assert.ok(!fromStacked.body.includes("前端核心贡献者"), "role must not leak into the body");
 });
+
+test("parseAtsCard reads labelled role and link lines", async () => {
+  const { parseAtsCard } = await import("../src/cli/ats");
+  // The renderer labels both fields so a parser keying on "label + colon" does
+  // not have to guess which bare value is the role.
+  const labelled = `项目经历\nExample · 内部交付平台 2026/06 - 2026/09\n项目角色：前端核心贡献者\n项目链接：https://github.com/example/platform\n技术栈：TypeScript`;
+  const p = parseAtsCard(labelled).projects[0];
+  assert.equal(p.name, "Example · 内部交付平台");
+  assert.equal(p.role, "前端核心贡献者");
+  assert.equal(p.date, "2026/06 - 2026/09");
+  assert.equal(p.url, "https://github.com/example/platform");
+  assert.ok(!p.body.includes("项目角色"), "the role label must not leak into the body");
+  assert.ok(!p.body.includes("项目链接"), "the link label must not leak into the body");
+  assert.ok(p.body.includes("技术栈"), "description must survive");
+});

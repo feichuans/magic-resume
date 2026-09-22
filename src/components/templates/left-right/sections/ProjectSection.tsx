@@ -48,14 +48,19 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({ projects, globalSetting
                                     {formatDateString(project.date, locale)}
                                 </div>
                             </motion.div>
+                            {/*
+                              A parser identifies fields from a label plus a colon,
+                              and guesses when a line carries a bare value. Without
+                              the label the role reads as part of the project name.
+                            */}
                             {project.role && (
                                 <motion.div layout="position" className="text-subtitleFont" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
-                                    {project.role}
+                                    项目角色：{project.role}
                                 </motion.div>
                             )}
                             {projectLink && (
                                 <div className="text-subtitleFont" style={{ fontSize: `${globalSettings?.baseFontSize || 14}px` }}>
-                                    项目地址：
+                                    项目链接：
                                     <a href={projectLink.href} target="_blank" rel="noopener noreferrer" className="underline" title={projectLink.title}>
                                         {projectLink.href}
                                     </a>
