@@ -82,6 +82,47 @@ AI_PROXY_URL=http://127.0.0.1:7890
 DeepSeek, Qwen, and Doubao continue to use a direct connection.
 
 
+## 💻 Command line (added in this fork)
+
+This fork adds a CLI alongside the web editor. The same `resume.json` can be edited from the browser or the shell, and both paths render through the same template components and Tailwind styles, so the PDF matches the web preview.
+
+```bash
+node bin/magic-resume.mjs help
+
+# Read: an indexed view for models, with rich text flattened to Markdown
+node bin/magic-resume.mjs read resume.json
+
+# Edit: single fields, atomic batches, or a template switch
+node bin/magic-resume.mjs set resume.json basic.title "Frontend Engineer"
+node bin/magic-resume.mjs ops resume.json --ops ops.json
+
+# Render and export
+node bin/magic-resume.mjs render resume.json -o out.pdf
+node bin/magic-resume.mjs export-md resume.json -o out.md
+```
+
+To produce a version tailored to one job description, `variant` writes a new file and leaves the source untouched, so one base resume stays reusable:
+
+```bash
+node bin/magic-resume.mjs variant resume.json tailored.json --ops ops.json -f pdf
+```
+
+### ATS text-layer check
+
+`ats` re-parses a rendered PDF the way an applicant tracking system would and reports fields that get glued, merged, or dropped:
+
+```bash
+node bin/magic-resume.mjs ats resume.json          # render, then parse
+node bin/magic-resume.mjs ats out.pdf --json       # inspect an existing file
+```
+
+It extracts contact details, education, experience and project entries, splitting each row into its columns (name | role | date) from glyph positions, and names the fields it could not recover.
+
+- Full command reference: [docs/cli.md](docs/cli.md)
+- Agent-facing workflow: [docs/agent-workflow.md](docs/agent-workflow.md)
+
+Rendering needs Chromium: `pnpm install:playwright` installs Playwright's bundled build, and the CLI falls back to the system Chrome or Edge when it is absent.
+
 ## 🐳 Docker Deployment
 
 ### Docker Compose

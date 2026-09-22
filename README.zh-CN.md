@@ -81,6 +81,47 @@ AI_PROXY_URL=http://127.0.0.1:7890
 
 DeepSeek、通义千问和豆包保持直连。
 
+## 💻 命令行（本 fork 新增）
+
+这个 fork 在网页编辑器之外新增了一层 CLI：同一份 `resume.json` 既可以在网页端编辑，也可以直接用命令行改，渲染出来的 PDF 与网页端一致（复用同一套模板组件和 Tailwind 样式）。
+
+```bash
+node bin/magic-resume.mjs help
+
+# 读：给模型看的带下标视图，富文本已转成 Markdown
+node bin/magic-resume.mjs read resume.json
+
+# 改：单字段、批量 ops（原子写入）、换模板
+node bin/magic-resume.mjs set resume.json basic.title "前端开发工程师"
+node bin/magic-resume.mjs ops resume.json --ops ops.json
+
+# 渲染与导出
+node bin/magic-resume.mjs render resume.json -o out.pdf
+node bin/magic-resume.mjs export-md resume.json -o out.md
+```
+
+按 JD 生成定制版本时用 `variant`，它不会修改源文件，所以一份基础简历可以反复复用：
+
+```bash
+node bin/magic-resume.mjs variant resume.json tailored.json --ops ops.json -f pdf
+```
+
+### ATS 文本层检查
+
+`ats` 把渲染好的 PDF 按 ATS 的方式重新解析一遍，检查字段是否会被粘行、合并或丢失：
+
+```bash
+node bin/magic-resume.mjs ats resume.json          # 渲染后再解析
+node bin/magic-resume.mjs ats out.pdf --json       # 检查已有产物
+```
+
+它会抽出姓名、联系方式、教育、实习与项目条目，并按坐标列切分「名称 | 角色 | 日期」，报告哪些字段没有解析出来。
+
+- 完整命令说明：[docs/cli.md](docs/cli.md)
+- 面向 Agent 的工作流：[docs/agent-workflow.md](docs/agent-workflow.md)
+
+渲染需要 Chromium：`pnpm install:playwright` 会安装 Playwright 自带的版本；没装时会回退到本机 Chrome / Edge。
+
 ## 🐳 Docker 部署
 
 ### Docker Compose
