@@ -521,3 +521,26 @@ https://github.com/example/another/pull/1`;
   const mergedIds = evaluateAtsText(merged, 2, mergedCard).map((item) => item.id);
   assert.ok(mergedIds.includes("project-unlabeled-url"));
 });
+
+test("parseAtsCard reads the role whether it shares the title row or sits below", async () => {
+  const { parseAtsCard } = await import("../src/cli/ats");
+  const COL = "\t";
+
+  // Column layout: the renderer puts name | role | date on one visual row.
+  const columns = `项目经历\nExample｜内部交付平台${COL}前端核心贡献者${COL}2026/06 - 2026/09\n项目地址：https://github.com/example/platform\n描述`;
+  const fromColumns = parseAtsCard(columns).projects[0];
+  assert.equal(fromColumns.name, "Example｜内部交付平台");
+  assert.equal(fromColumns.role, "前端核心贡献者");
+  assert.equal(fromColumns.date, "2026/06 - 2026/09");
+  assert.equal(fromColumns.url, "https://github.com/example/platform");
+  assert.ok(!fromColumns.body.includes("前端核心贡献者"), "role must not leak into the body");
+
+  // Stacked layout: name+date on line 1, role alone on line 2.
+  const stacked = `项目经历\nExample｜内部交付平台 2026/06 - 2026/09\n前端核心贡献者\n项目地址：https://github.com/example/platform\n描述`;
+  const fromStacked = parseAtsCard(stacked).projects[0];
+  assert.equal(fromStacked.name, "Example｜内部交付平台");
+  assert.equal(fromStacked.role, "前端核心贡献者");
+  assert.equal(fromStacked.date, "2026/06 - 2026/09");
+  assert.equal(fromStacked.url, "https://github.com/example/platform");
+  assert.ok(!fromStacked.body.includes("前端核心贡献者"), "role must not leak into the body");
+});

@@ -174,23 +174,24 @@ const splitEntries = (body: string): AtsEntry[] => {
     const urlLine = rest.find((line) => URL_RE.test(line));
     const url = urlLine?.match(URL_RE)?.[0];
 
-    // With a column-aware row the role is its own column; otherwise fall back to
-    // a short unlabelled line directly under the title.
+    // Two valid layouts exist in the wild: role as its own column on the title
+    // row, or role alone on the next line. Try the column first, then fall back
+    // to a short unlabelled line directly under the title.
     let role: string | undefined;
     if (columns.length >= 2) {
       const trailing = columns.slice(1).filter((part) => !DATE_RE.test(part));
       role = trailing[0];
-    } else {
+    }
+    if (!role) {
       const first = rest[0] ?? "";
-      role =
+      const isRoleLine =
         first &&
         !URL_RE.test(first) &&
         !first.startsWith("项目地址") &&
         first.length <= 40 &&
         !first.includes("：") &&
-        !first.includes(":")
-          ? first
-          : undefined;
+        !first.includes(":");
+      if (isRoleLine) role = first;
     }
 
     const bodyLines = rest.filter((line) => line !== urlLine && line !== role);
