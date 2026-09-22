@@ -61,6 +61,16 @@ type PdfTextItem = {
   hasEOL?: boolean;
 };
 
+/**
+ * Column separator used inside a text row. Rows are assembled from positioned
+ * glyph runs, so a wide horizontal gap marks a new column; keeping the marker
+ * lets the entry splitter tell "name | role | date" from one run-on string.
+ */
+export const COLUMN_SEP = "\t";
+
+/** Horizontal gap (in PDF points) that marks a column boundary. */
+const COLUMN_GAP_PT = 15;
+
 const lineKey = (y: number): number => Math.round(y * 2) / 2;
 
 const extractPdfText = async (pdfPath: string): Promise<{ pages: number; text: string }> => {
@@ -75,7 +85,7 @@ const extractPdfText = async (pdfPath: string): Promise<{ pages: number; text: s
   for (let index = 1; index <= pdf.numPages; index += 1) {
     const page = await pdf.getPage(index);
     const content = await page.getTextContent();
-    const rows = new Map<number, Array<{ x: number; str: string }>>();
+    const rows = new Map<number, Array<{ x: number; w: number; str: string }>>();
 
     for (const raw of content.items as PdfTextItem[]) {
       const str = raw.str ?? "";
@@ -84,42 +94,61 @@ const extractPdfText = async (pdfPath: string): Promise<{ pages: number; text: s
       const x = transform[4] ?? 0;
       const y = lineKey(transform[5] ?? 0);
       const row = rows.get(y) ?? [];
-      row.push({ x, str });
+      row.push({ x, w: raw.width ?? 0, str });
       rows.set(y, row);
     }
 
     const lines = [...rows.entries()]
       .sort((a, b) => b[0] - a[0])
-      .map(([, parts]) =>
-        parts
-          .sort((a, b) => a.x - b.x)
-          .map((part) => part.str)
-          .join("")
-          .replace(/[ \t]+/g, " ")
-          .trim()
-      )
-      .filter(Boolean);
+      .map(([, parts]) => {
+        const ordered = parts.sort((a, b) => a.x - b.x);
+        let out = "";
+        let lastEnd: number | null = null;
+        for (const part of ordered) {
+          const blank = part.str.trim().length === 0;
+          if (!blank && lastEnd !== null && part.x - lastEnd >= COLUMN_GAP_PT) {
+            out += COLUMN_SEP;
+          }
+          out += part.str;
+          if (!blank) lastEnd = part.x + part.w;
+        }
+        return out.replace(/ {2,}/g, " ").trim();
+      })
+      .filter((line) => line.replace(new RegExp(COLUMN_SEP, "g"), "").trim().length > 0);
 
     pages.push(lines.join("\n"));
-  }
+  };
 
   return { pages: pdf.numPages, text: pages.join("\n") };
 };
 
+/** Keeps the column marker so the entry splitter can tell columns apart. */
 const linesOf = (text: string): string[] =>
   text
     .split(/\r?\n/)
-    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .map((line) => line.replace(/[ ]{2,}/g, " ").trim())
+    .filter((line) => line.replace(new RegExp(COLUMN_SEP, "g"), "").trim().length > 0);
+
+/** Splits a row into its columns; a single-column row returns one part. */
+const columnsOf = (line: string): string[] =>
+  line
+    .split(COLUMN_SEP)
+    .map((part) => part.trim())
     .filter(Boolean);
 
-const takeDate = (line: string): { name: string; date?: string } => {
+const takeDate = (line: string): { name: string; date?: string; columns: string[] } => {
+  const columns = columnsOf(line);
   const match = line.match(DATE_RE);
-  if (!match || match.index === undefined) return { name: line };
+  if (!match || match.index === undefined) {
+    return { name: columns[0] ?? line, columns };
+  }
   const date = match[0].replace(/\s+/g, " ").trim();
-  const name = `${line.slice(0, match.index)} ${line.slice(match.index + match[0].length)}`
-    .replace(/\s+/g, " ")
-    .trim();
-  return { name, date };
+  // The title is the leading column; a column-aware row would otherwise keep
+  // every sibling column in the name.
+  const text = `${line.slice(0, match.index)}${COLUMN_SEP}${line.slice(match.index + match[0].length)}`;
+  const parts = columnsOf(text);
+  const name = (parts[0] ?? "").trim();
+  return { name, date, columns };
 };
 
 const splitEntries = (body: string): AtsEntry[] => {
@@ -128,10 +157,11 @@ const splitEntries = (body: string): AtsEntry[] => {
 
   const starts: number[] = [];
   for (let index = 0; index < lines.length; index += 1) {
+    // A line only anchors an entry when it carries a date.
     if (DATE_RE.test(lines[index])) starts.push(index);
   }
   if (starts.length === 0) {
-    return [{ name: lines[0], body: lines.slice(1).join("\n") }];
+    return [{ name: columnsOf(lines[0])[0] ?? lines[0], body: lines.slice(1).join("\n") }];
   }
 
   const entries: AtsEntry[] = [];
@@ -139,23 +169,33 @@ const splitEntries = (body: string): AtsEntry[] => {
     const from = starts[index];
     const to = starts[index + 1] ?? lines.length;
     const chunk = lines.slice(from, to);
-    const { name, date } = takeDate(chunk[0] ?? "");
+    const { name, date, columns } = takeDate(chunk[0] ?? "");
     const rest = chunk.slice(1);
     const urlLine = rest.find((line) => URL_RE.test(line));
     const url = urlLine?.match(URL_RE)?.[0];
-    const first = rest[0] ?? "";
-    const role =
-      first &&
-      !URL_RE.test(first) &&
-      !first.startsWith("项目地址") &&
-      first.length <= 40 &&
-      !first.includes("：") &&
-      !first.includes(":")
-        ? first
-        : undefined;
+
+    // With a column-aware row the role is its own column; otherwise fall back to
+    // a short unlabelled line directly under the title.
+    let role: string | undefined;
+    if (columns.length >= 2) {
+      const trailing = columns.slice(1).filter((part) => !DATE_RE.test(part));
+      role = trailing[0];
+    } else {
+      const first = rest[0] ?? "";
+      role =
+        first &&
+        !URL_RE.test(first) &&
+        !first.startsWith("项目地址") &&
+        first.length <= 40 &&
+        !first.includes("：") &&
+        !first.includes(":")
+          ? first
+          : undefined;
+    }
+
     const bodyLines = rest.filter((line) => line !== urlLine && line !== role);
     entries.push({
-      name: name || chunk[0] || "",
+      name: name || columnsOf(chunk[0] ?? "")[0] || chunk[0] || "",
       role,
       date,
       url,
@@ -202,13 +242,13 @@ export const parseAtsCard = (text: string): AtsCard => {
   const phone = headerText.match(PHONE_RE)?.[0] ?? text.match(PHONE_RE)?.[0] ?? "";
   const urls = [...new Set(text.match(URL_RE) ?? [])];
 
-  const name = header[0] ?? "";
+  const name = columnsOf(header[0] ?? "")[0] ?? "";
   const titleLine =
-    header.find((line) => line !== name && !/^https?:/i.test(line) && !EMAIL_RE.test(line) && !PHONE_RE.test(line)) ??
-    header.find((line) => line !== name && /(邮箱|电话|手机)[:：]/.test(line)) ??
+    header.find((line) => line !== (header[0] ?? "") && !/^https?:/i.test(line) && !EMAIL_RE.test(line) && !PHONE_RE.test(line)) ??
+    header.find((line) => line !== (header[0] ?? "") && /(邮箱|电话|手机)[:：]/.test(line)) ??
     "";
   const glued = titleLine.match(/^(.*?)(邮箱|电话|手机|个人网站|Github)/);
-  const title = (glued ? glued[1] : titleLine).replace(/[:：]\s*$/, "").trim();
+  const title = (glued ? glued[1] : titleLine).split(COLUMN_SEP).join(" ").replace(/[:：]\s*$/, "").trim();
 
   const educationRaw = bodies["教育经历"] ?? "";
   const experienceRaw = bodies["实习经历"] || bodies["工作经历"] || bodies["工作经验"] || "";

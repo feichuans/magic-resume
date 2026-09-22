@@ -35,24 +35,24 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({ projects, globalSetting
                             style={{ marginTop: `${globalSettings?.paragraphSpacing}px` }}
                         >
                             {/*
-                              ATS parsers (Beisen / Feishu / Moka) split entries on
-                              "entity + date" lines. Keep name+date on line 1, role on
-                              line 2, and the URL labelled on line 3 — never insert a
-                              bare URL between two project titles.
+                              Mirror the experience header so parsers read the same
+                              shape: entity | role | date on one line. A role on its
+                              own line has no date anchor, so parsers drop it or
+                              attach it to the neighbouring entry.
                             */}
-                            <motion.div className="flex items-baseline justify-between gap-2">
-                                <h3 className="font-bold min-w-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                            <motion.div className="flex items-center gap-2">
+                                <h3 className="font-bold flex-[1.5] min-w-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
                                     {project.name}
                                 </h3>
-                                <div className="text-subtitleFont shrink-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                                {project.role && (
+                                    <motion.div className="text-subtitleFont flex-1 min-w-0" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
+                                        {project.role}
+                                    </motion.div>
+                                )}
+                                <div className="text-subtitleFont shrink-0 flex-1 text-right" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
                                     {formatDateString(project.date, locale)}
                                 </div>
                             </motion.div>
-                            {project.role && (
-                                <motion.div layout="position" className="text-subtitleFont" style={{ fontSize: `${globalSettings?.subheaderSize || 16}px` }}>
-                                    {project.role}
-                                </motion.div>
-                            )}
                             {projectLink && (
                                 <div className="text-subtitleFont" style={{ fontSize: `${globalSettings?.baseFontSize || 14}px` }}>
                                     项目地址：
